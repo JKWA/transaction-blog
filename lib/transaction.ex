@@ -1,65 +1,92 @@
-import Funx.Macros, only: [ord_for: 2]
+import Funx.Macros, only: [eq_for: 2, ord_for: 2]
 alias Funx.Optics.{Lens, Prism}
 
 defmodule Transaction do
-  defstruct [:type]
+  defstruct [:id, :type, :item]
 
   def type_prism do
     Prism.path([{__MODULE__, :type}])
   end
 
+
+  eq_for(
+    Transaction,
+    Lens.key(:id)
+  )
+
   ord_for(
     Transaction,
-    Lens.path([:type, :payment, :name])
+    Prism.path([{Transaction, :item}, Item])
+  )
+end
+
+defmodule Item do
+  defstruct [:name, :price]
+
+  ord_for(
+    Item,
+    Lens.key(:name)
   )
 end
 
 defmodule Charge do
   alias Funx.Optics.Prism
-  defstruct [:payment]
+  defstruct [:payment, :status]
 
   def payment_prism do
     Prism.path([{__MODULE__, :payment}])
   end
 
+  eq_for(
+    Charge,
+    Prism.path([{Charge, :payment}, :id])
+  )
+
   ord_for(
     Charge,
-    Lens.path([:payment, :name])
+    Prism.path([{Charge, :payment}, :name])
   )
 end
 
 defmodule Refund do
   alias Funx.Optics.Prism
-  defstruct [:payment]
+  defstruct [:payment, :status]
 
   def payment_prism do
     Prism.path([{__MODULE__, :payment}])
   end
 
+  eq_for(
+    Refund,
+    Prism.path([{Refund, :payment}, :id])
+  )
+
   ord_for(
     Refund,
-    Lens.path([:payment, :name])
+    Prism.path([{Refund, :payment}, :name])
   )
 end
 
 defmodule Check do
   alias Funx.Optics.Prism
-  defstruct [:name, :routing_number, :account_number, :amount]
+  defstruct [:id, :name, :routing_number, :account_number, :amount]
 
   def amount_prism do
     Prism.path([{__MODULE__, :amount}])
   end
 
+  eq_for(Check, Lens.key(:id))
   ord_for(Check, Lens.key(:name))
 end
 
 defmodule CreditCard do
   alias Funx.Optics.Prism
-  defstruct [:name, :number, :expiry, :amount]
+  defstruct [:id, :name, :number, :expiry, :amount]
 
   def amount_prism do
     Prism.path([{__MODULE__, :amount}])
   end
 
-  ord_for(CreditCard, Lens.key(:name))
+  eq_for(CreditCard, Lens.key(:id))
+  ord_for(CreditCard, Lens.key(:id))
 end

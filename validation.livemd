@@ -1,0 +1,532 @@
+# Funx: Validator
+
+```elixir
+Mix.install([
+   {:transaction, path: Path.expand(__DIR__)}                                                   
+])
+```
+
+## Start
+
+```elixir
+alias Funx.Optics.{Lens, Prism}
+alias Funx.Validator
+alias Funx.Monad.Either
+
+alias Funx.Validator.{
+  Any,
+  Integer, 
+  Positive, 
+  Required, 
+  In, 
+  Negative, 
+  Positive, 
+  AllEqual, 
+  Range, 
+  LiftPredicate
+}
+
+alias Transaction.User
+
+alias Funx.Optics.{Lens, Prism, Traversal}
+alias Funx.Monad.Either
+
+require Logger
+use Funx.Monad.Maybe
+use Funx.Monad.Either
+use Funx.Validate
+use Funx.Eq
+```
+
+```elixir
+eq_by_id =
+  eq do
+    on :id
+  end
+
+Funx.List.uniq(
+  [
+    %User{id: 1, name: "Jim", age: 21, status: :active},
+    %User{id: 1, name: "James", age: 20, status: :active}
+  ]
+)
+```
+
+```elixir
+jim = %User{id: 1, age: 20, name: "Jim", status: :active}
+beth = %User{id: 2, age: 21, name: "Beth", status: :inactive}
+incomplete_user =  %User{id: 1, age: 20, name: nil, status: :active}
+
+users = [jim, beth, incomplete_user]
+```
+
+```elixir
+Positive.validate(1)
+```
+
+```elixir
+Positive.validate(-1)
+```
+
+```elixir
+user_val = 
+  validate do
+    at :id, Integer
+    at :age, Positive
+    at :name, Required
+    at :status, {In, values: [:active, :inactive] }
+  end
+```
+
+```elixir
+Either.validate(jim, user_val)
+```
+
+```elixir
+Either.validate(incomplete_user, user_val)
+```
+
+Can pass `message` functon to any validator
+
+```elixir
+user_val = 
+  validate do
+    at :id, Integer
+    at :age, Positive
+    at :name, {Required, message: fn _ -> "Name is required" end}
+    at :status, [
+        {Required, message: fn _ -> "Status is required" end}, 
+        {In, values: [:active, :inactive] }
+      ]
+  end
+Either.validate(incomplete_user, user_val)
+```
+
+```elixir
+unsafe_user =  %{age: 20}
+Either.validate(unsafe_user, user_val)
+```
+
+It didn't catch the missing "ID". Validations do not run on missing data unless we include Required.  However, if `id` is an invariant (it can NEVER be absent), we can leverage the `Lens` optic
+
+```elixir
+user_val = 
+  validate do
+    at Lens.key(:id), Integer
+    at :age, Positive
+    at :name, {Required, message: fn _ -> "Name is required" end}
+    at :status, [
+        {Required, message: fn _ -> "Status is required" end}, 
+        {In, values: [:active, :inactive] }
+      ]
+  end
+# Either.validate(unsafe_user, user_val)
+```
+
+And it will raise an error.
+
+Can use validators without `at`, such as using `In` to check if the user is part of the user group
+
+```elixir
+user_val = 
+  validate do
+    at Lens.key(:id), Integer
+    at :age, Positive
+    at :name, {Required, message: fn _ -> "Name is required" end}
+    at :status, [
+        {Required, message: fn _ -> "Status is required" end}, 
+        {In, values: [:active, :inactive] }
+      ]
+    {In, values: users, message: fn _ -> "Must be an exisitng user" end }
+  end
+Either.validate(jim, user_val)
+```
+
+```elixir
+dave = %User{id: 5, age: 34, name: "Dave", status: :active}
+Either.validate(dave, user_val)
+```
+
+Dave is not a current user.
+
+What about James?
+
+```elixir
+james = %User{id: 1, age: 23, name: "James", status: :active}
+
+Either.validate(james, user_val)
+```
+
+Yes. Funx's equality defaults to the Eq protocol. For Users we established they are equal if they share an `id`.  In this case, James is just a different spelling of Jim.
+
+```elixir
+james = %User{id: 1, age: 20, name: "James", status: :active}
+
+Either.validate(james, user_val)
+```
+
+```elixir
+Funx.List.uniq([jim, james])
+```
+
+```elixir
+slow_val = 
+  validate do
+    {Slow.Validation, delay_ms: 1500}
+  end
+# Either.validate(james, slow_val)
+```
+
+```elixir
+Either.validate(james, slow_val, env: %{db: "conn", user: james.id})
+```
+
+Sequence Mode
+
+```elixir
+slow_val = 
+  validate do
+    {Slow.Validation, delay_ms: 400}
+    {Slow.Validation, delay_ms: 400}
+    {Slow.Validation, delay_ms: 400}
+    {Slow.Validation, delay_ms: 400}
+    {Slow.Validation, delay_ms: 400}
+  end
+# Either.validate(james, slow_val)
+```
+
+Parallel Mode
+
+```elixir
+parallel_slow_val = 
+  validate mode: :parallel do
+    {Slow.Validation, delay_ms: 400}
+    {Slow.Validation, delay_ms: 400}
+    {Slow.Validation, delay_ms: 400}
+    {Slow.Validation, delay_ms: 400}
+    {Slow.Validation, delay_ms: 400}
+  end
+# Either.validate(james, parallel_slow_val)
+```
+
+Split fast and slow in either exectution block
+
+```elixir
+use Funx.Monad.Either
+
+# either jim do
+#   validate user_val
+#   validate [parallel_slow_val]
+# end
+```
+
+Works like `bind`, will not run expensive validation if first fails
+
+```elixir
+# either dave do
+#   validate user_val
+#   validate [parallel_slow_val]
+# end
+```
+
+Can pass env (Reader) on execution
+
+<!-- livebook:{"break_markdown":true} -->
+
+Next, some transactions:
+
+```elixir
+charge_cc =
+  %Transaction{
+    id: 1,
+    item: %Item{name: "Camera", price: 500},
+    type: %Charge{
+      payment: %CreditCard{id: 100, name: "Alice", number: "4111", expiry: "12/26", amount: 500},
+      status: :pending
+    }
+  }
+
+invalid_charge_cc =
+  %Transaction{
+    id: 2,
+    item: %Item{name: "Camera", price: 500},
+    type: %Charge{
+      payment: %CreditCard{id: 101, name: "Alice", number: "4111", expiry: "12/26", amount: 400},
+      status: :pending
+    }
+  }
+
+charge_check =
+  %Transaction{
+    id: 3,
+    item: %Item{name: "Lens", price: 300},
+    type: %Charge{
+      payment: %Check{id: 102, name: "Bob", routing_number: "111000025", account_number: "987654", amount: 300},
+      status: :pending
+    }
+  }
+
+refund_cc =
+  %Transaction{
+    id: 4,
+    item: %Item{name: "Tripod", price: 150},
+    type: %Refund{
+      payment: %CreditCard{id: 103, name: "Carol", number: "4333", expiry: "10/27", amount: 150},
+      status: :pending
+    }
+  }
+
+refund_check =
+  %Transaction{
+    id: 5,
+    item: %Item{name: "Flash", price: 200},
+    type: %Refund{
+      payment: %Check{id: 104, name: "Dave", routing_number: "222000025", account_number: "123456", amount: 200},
+      status: :pending
+    }
+  }
+
+transactions = [charge_cc, charge_check, refund_cc, refund_check]
+```
+
+```elixir
+check_val = 
+  validate do
+    at Lens.key(:id), [Integer, Positive]
+    at :name, Required
+    at :routing_number, Required
+    at :account_number, Required
+    at :amount, [Required, Positive]
+  end
+
+cc_val = 
+  validate do
+    at Lens.key(:id), [Integer, Positive]
+    at :name, Required
+    at :number, Required
+    at :expiry, Required
+    at :amount, [Required, Positive]
+  end
+
+payment_val =
+  validate do
+    at :payment, {
+      Any, 
+      validators: [check_val, cc_val],
+      message: fn  -> "Must be a valid Check or CreditCard" end
+    }
+    at :status, {In, values: [:pending, :complete]}
+  end
+
+type_val =
+  validate do
+    at :type, {
+      In, 
+      values: [Charge, Refund],
+      message: fn _ -> "Must be a Charge or Refund" end
+    }
+    at Lens.path([:type, :payment]), payment_val
+  end
+
+item_val = 
+  validate do
+    at :name, Required
+    at :price, [Required, Positive]
+  end
+
+cc_prism = 
+  Prism.path([
+      {Transaction, :type}, 
+      :payment, 
+    {CreditCard, :amount}
+  ])
+
+price_lens = Lens.path([:item, :price])
+
+amount_trav = Traversal.combine([price_lens, cc_prism])
+
+
+transaction_val = 
+  validate do
+    at :item, item_val
+    at :type, [
+      {
+        In, 
+        values: [Charge, Refund],
+        message: fn _ -> "Must be a Charge or Refund" end
+      },
+      payment_val
+    ]
+    at amount_trav, {AllEqual, message: fn _ -> "Amounts must match" end}
+  end
+
+
+Either.validate(refund_cc, transaction_val)
+```
+
+```elixir
+Either.validate(invalid_charge_cc, transaction_val)
+```
+
+```elixir
+Either.validate(charge_check, transaction_val)
+```
+
+```elixir
+cc_refund_val = 
+  validate do
+    at Lens.path([:type]),
+      {
+        In, 
+        values: [Refund],
+        message: fn _ -> "Must be a refund" end
+      }
+    at Lens.path([:type, :payment]),
+      {
+        In, 
+        values: [CreditCard],
+        message: fn _ -> "Must be a credit card" end
+      }
+  end
+
+Either.validate(refund_cc, [cc_refund_val, transaction_val])
+```
+
+```elixir
+Either.validate(charge_check, [cc_refund_val, transaction_val])
+```
+
+```elixir
+Either.validate(invalid_charge_cc, [cc_refund_val, transaction_val])
+```
+
+```elixir
+Either.validate(invalid_charge_cc, cc_val)
+```
+
+Can pass env (Reader) on execution
+
+```elixir
+slow_val = 
+  validate do
+    Slow.Validation
+  end
+
+
+Either.validate(
+  invalid_charge_cc, 
+  slow_val, 
+  env: %{db: "conn_a", user: "current_user_a"}
+)
+```
+
+```elixir
+either 101 do
+  validate [Positive, {Range, min: 1, max: 100}]
+end
+```
+
+```elixir
+seq_slow_val = 
+  validate do
+    Slow.Validation
+    Slow.Validation
+    Slow.Validation
+    Slow.Validation
+    Slow.Validation
+  end
+```
+
+```elixir
+Either.validate(invalid_charge_cc, seq_slow_val)
+```
+
+```elixir
+parallel_slow_val = 
+  validate mode: :parallel do
+    Slow.Validation
+    Slow.Validation
+    Slow.Validation
+    Slow.Validation
+    Slow.Validation
+  end
+```
+
+```elixir
+use Funx.Monad.Either
+
+either jim do
+    validate [parallel_slow_val]
+  end
+```
+
+```elixir
+Either.validate(
+  invalid_charge_cc, 
+  parallel_slow_val,
+  env: %{db: "conn_a", user: "current_user_a"}
+)
+```
+
+```elixir
+either charge_cc, as: :tuple, env: %{db: "conn", user: "current_user"} do
+  validate cc_val
+  validate parallel_slow_val
+end
+```
+
+```elixir
+either invalid_charge_cc, as: :tuple do
+  validate cc_val
+  validate parallel_slow_val
+end
+```
+
+```elixir
+use Funx.Predicate
+
+max_pred =
+    pred do
+      check cc_prism, fn amount -> amount < 100 end
+    end
+
+
+```
+
+```elixir
+either invalid_charge_cc, as: :tuple do
+  validate {LiftPredicate, pred: max_pred}
+end
+```
+
+```elixir
+val = validate do
+   at cc_prism, {LiftPredicate, pred: fn amount -> amount > 100 end}
+end
+
+either invalid_charge_cc, as: :tuple do
+  validate val
+end
+```
+
+```elixir
+either invalid_charge_cc, as: :tuple do
+  validate val
+end
+```
+
+```elixir
+alias Funx.Validator.{Any, Negative, Positive}
+
+either 10, as: :tuple do
+  validate [{Range, min: 11}, {Any, validators: [Negative, Slow.Validation]}]
+end
+```
+
+```elixir
+alias Funx.Validator.Not
+
+either 0, as: :tuple do
+  validate [{Not, validator: Positive}, {Not, validator: Negative}]
+end
+```
