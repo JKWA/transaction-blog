@@ -15,6 +15,7 @@ alias Funx.Monad.Either
 
 alias Funx.Validator.{
   Any,
+  Equal,
   Integer, 
   Positive, 
   Required, 
@@ -86,7 +87,7 @@ Either.validate(jim, user_val)
 Either.validate(incomplete_user, user_val)
 ```
 
-Can pass `message` functon to any validator
+Can pass `message` function to any validator
 
 ```elixir
 user_val = 
@@ -137,7 +138,7 @@ user_val =
         {Required, message: fn _ -> "Status is required" end}, 
         {In, values: [:active, :inactive] }
       ]
-    {In, values: users, message: fn _ -> "Must be an exisitng user" end }
+    {In, values: users, message: fn _ -> "Must be an existing user" end }
   end
 Either.validate(jim, user_val)
 ```
@@ -209,7 +210,7 @@ parallel_slow_val =
 # Either.validate(james, parallel_slow_val)
 ```
 
-Split fast and slow in either exectution block
+Split fast and slow in either execution block
 
 ```elixir
 use Funx.Monad.Either
@@ -229,11 +230,9 @@ Works like `bind`, will not run expensive validation if first fails
 # end
 ```
 
-Can pass env (Reader) on execution
+## Compost complex from simple (model complex DDD and Sum type
 
-<!-- livebook:{"break_markdown":true} -->
-
-Next, some transactions:
+Here is some data:
 
 ```elixir
 charge_cc =
@@ -289,6 +288,8 @@ refund_check =
 transactions = [charge_cc, charge_check, refund_cc, refund_check]
 ```
 
+Simple payment type
+
 ```elixir
 check_val = 
   validate do
@@ -307,7 +308,13 @@ cc_val =
     at :expiry, Required
     at :amount, [Required, Positive]
   end
+```
 
+Can combine them disjunctively with `Any` validator.
+
+Note: can't use an `any` block because how do we report the failure?
+
+```elixir
 payment_val =
   validate do
     at :payment, {
@@ -317,24 +324,41 @@ payment_val =
     }
     at :status, {In, values: [:pending, :complete]}
   end
+```
 
-type_val =
-  validate do
-    at :type, {
-      In, 
-      values: [Charge, Refund],
-      message: fn _ -> "Must be a Charge or Refund" end
-    }
-    at Lens.path([:type, :payment]), payment_val
-  end
+And the `Item`
 
+```elixir
 item_val = 
   validate do
     at :name, Required
     at :price, [Required, Positive]
   end
+```
 
-cc_prism = 
+Composing complex from simple. Note that `In` in Funx not just for atoms and strings, it also works for structs:
+
+```elixir
+transaction_val = 
+  validate do
+    at :item, item_val
+    at :type, [
+      {
+        In, 
+        values: [Charge, Refund],
+        message: fn _ -> "Must be a Charge or Refund" end
+      },
+      payment_val
+    ]
+  end
+
+Either.validate(refund_cc, transaction_val)
+```
+
+Can validate more complex domain rules.
+
+```elixir
+cc_amount_prism = 
   Prism.path([
       {Transaction, :type}, 
       :payment, 
@@ -343,7 +367,7 @@ cc_prism =
 
 price_lens = Lens.path([:item, :price])
 
-amount_trav = Traversal.combine([price_lens, cc_prism])
+amount_trav = Traversal.combine([price_lens, cc_amount_prism])
 
 
 transaction_val = 
@@ -364,27 +388,33 @@ transaction_val =
 Either.validate(refund_cc, transaction_val)
 ```
 
+`AllEq` uses `Eq` protocol, in this case it is checking two amounts in the transaction extracted with a `Traversal` optic.
+
 ```elixir
 Either.validate(invalid_charge_cc, transaction_val)
 ```
 
+Works on all valid transactions:
+
 ```elixir
 Either.validate(charge_check, transaction_val)
 ```
+
+The `Any` is disjunctive. But we can add more conjunctive validations.
 
 ```elixir
 cc_refund_val = 
   validate do
     at Lens.path([:type]),
       {
-        In, 
-        values: [Refund],
+        Equal, 
+        value: Refund,
         message: fn _ -> "Must be a refund" end
       }
     at Lens.path([:type, :payment]),
       {
-        In, 
-        values: [CreditCard],
+        Equal, 
+        value: CreditCard,
         message: fn _ -> "Must be a credit card" end
       }
   end
@@ -392,141 +422,32 @@ cc_refund_val =
 Either.validate(refund_cc, [cc_refund_val, transaction_val])
 ```
 
+`cc_refund_val` validates that the transaction is a `CreditCard` *and* a `Refund`
+
 ```elixir
-Either.validate(charge_check, [cc_refund_val, transaction_val])
+Either.validate(refund_cc, cc_refund_val)
 ```
 
+We can conjunctively combine `cc_refund_val`, `transaction_val` in the `Either`:
+
 ```elixir
-Either.validate(invalid_charge_cc, [cc_refund_val, transaction_val])
+Either.validate(refund_cc, [cc_refund_val, transaction_val])
 ```
 
-```elixir
-Either.validate(invalid_charge_cc, cc_val)
-```
-
-Can pass env (Reader) on execution
+Or with the DSL:
 
 ```elixir
-slow_val = 
+cc_refund_transaction_val = 
   validate do
-    Slow.Validation
-  end
-
-
-Either.validate(
-  invalid_charge_cc, 
-  slow_val, 
-  env: %{db: "conn_a", user: "current_user_a"}
-)
-```
-
-```elixir
-either 101 do
-  validate [Positive, {Range, min: 1, max: 100}]
-end
-```
-
-```elixir
-seq_slow_val = 
-  validate do
-    Slow.Validation
-    Slow.Validation
-    Slow.Validation
-    Slow.Validation
-    Slow.Validation
+    cc_refund_val
+    transaction_val
   end
 ```
 
 ```elixir
-Either.validate(invalid_charge_cc, seq_slow_val)
+Either.validate(charge_check, cc_refund_transaction_val)
 ```
 
 ```elixir
-parallel_slow_val = 
-  validate mode: :parallel do
-    Slow.Validation
-    Slow.Validation
-    Slow.Validation
-    Slow.Validation
-    Slow.Validation
-  end
-```
-
-```elixir
-use Funx.Monad.Either
-
-either jim do
-    validate [parallel_slow_val]
-  end
-```
-
-```elixir
-Either.validate(
-  invalid_charge_cc, 
-  parallel_slow_val,
-  env: %{db: "conn_a", user: "current_user_a"}
-)
-```
-
-```elixir
-either charge_cc, as: :tuple, env: %{db: "conn", user: "current_user"} do
-  validate cc_val
-  validate parallel_slow_val
-end
-```
-
-```elixir
-either invalid_charge_cc, as: :tuple do
-  validate cc_val
-  validate parallel_slow_val
-end
-```
-
-```elixir
-use Funx.Predicate
-
-max_pred =
-    pred do
-      check cc_prism, fn amount -> amount < 100 end
-    end
-
-
-```
-
-```elixir
-either invalid_charge_cc, as: :tuple do
-  validate {LiftPredicate, pred: max_pred}
-end
-```
-
-```elixir
-val = validate do
-   at cc_prism, {LiftPredicate, pred: fn amount -> amount > 100 end}
-end
-
-either invalid_charge_cc, as: :tuple do
-  validate val
-end
-```
-
-```elixir
-either invalid_charge_cc, as: :tuple do
-  validate val
-end
-```
-
-```elixir
-alias Funx.Validator.{Any, Negative, Positive}
-
-either 10, as: :tuple do
-  validate [{Range, min: 11}, {Any, validators: [Negative, Slow.Validation]}]
-end
-```
-
-```elixir
-alias Funx.Validator.Not
-
-either 0, as: :tuple do
-  validate [{Not, validator: Positive}, {Not, validator: Negative}]
-end
+Either.validate(invalid_charge_cc, cc_refund_transaction_val)
 ```
