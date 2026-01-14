@@ -1,0 +1,9 @@
+# Funx: TEST
+
+```elixir
+Mix.install([
+   {:transaction, path: Path.expand(__DIR__)}                                                   
+])
+```
+
+## Explore
