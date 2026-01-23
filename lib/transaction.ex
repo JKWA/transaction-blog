@@ -1,12 +1,18 @@
-import Funx.Macros, only: [ord_for: 2]
+import Funx.Macros, only: [eq_for: 2, ord_for: 2]
 alias Funx.Optics.{Lens, Prism}
+use Funx.Eq
 
 defmodule Transaction do
-  defstruct [:type]
+  defstruct [:id, :type]
 
   def type_prism do
     Prism.path([{__MODULE__, :type}])
   end
+
+  eq_for(
+    Transaction,
+    Lens.key([:id])
+  )
 
   ord_for(
     Transaction,
@@ -22,6 +28,11 @@ defmodule Charge do
     Prism.path([{__MODULE__, :payment}])
   end
 
+  eq_for(
+    Charge,
+    Lens.path([:payment, :amount])
+  )
+
   ord_for(
     Charge,
     Lens.path([:payment, :name])
@@ -35,6 +46,11 @@ defmodule Refund do
   def payment_prism do
     Prism.path([{__MODULE__, :payment}])
   end
+
+  eq_for(
+    Refund,
+    Lens.path([:payment, :amount])
+  )
 
   ord_for(
     Refund,
@@ -50,6 +66,14 @@ defmodule Check do
     Prism.path([{__MODULE__, :amount}])
   end
 
+  eq_for(
+    Check,
+    eq do
+      on Prism.path([{Check, :routing_number}])
+      on Prism.path([{Check, :account_number}])
+    end
+  )
+
   ord_for(Check, Lens.key(:name))
 end
 
@@ -60,6 +84,13 @@ defmodule CreditCard do
   def amount_prism do
     Prism.path([{__MODULE__, :amount}])
   end
+
+  eq_for(
+    CreditCard,
+    eq do
+      on Prism.path([{CreditCard, :number}])
+    end
+  )
 
   ord_for(CreditCard, Lens.key(:name))
 end
