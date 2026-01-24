@@ -21,7 +21,7 @@ defmodule Transaction.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:funx, github: "JKWA/funx", ref: "5e5e8ec"}
+      {:funx, github: "JKWA/funx", ref: "8fef079"}
     ]
   end
 end

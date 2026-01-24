@@ -1,4 +1,4 @@
 %{
-  "funx": {:git, "https://github.com/JKWA/funx.git", "5e5e8ec8681c1d9b28ed801d4b7ea9aa033a9171", [ref: "5e5e8ec"]},
+  "funx": {:git, "https://github.com/JKWA/funx.git", "8fef0798c424c707493a31965fda2a00593dcc43", [ref: "8fef079"]},
   "telemetry": {:hex, :telemetry, "1.3.0", "fedebbae410d715cf8e7062c96a1ef32ec22e764197f70cda73d82778d61e7a2", [:rebar3], [], "hexpm", "7015fc8919dbe63764f4b4b87a95b7c0996bd539e0d499be6ec9d7f3875b79e6"},
 }
