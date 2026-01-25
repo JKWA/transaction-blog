@@ -42,6 +42,12 @@ defmodule Game.Card do
     end
   end
 
+  def suit_ord do
+    ord do
+      asc Lens.key(:suit)
+    end
+  end
+
   def card_ord do
     ord do
       asc Lens.key(:suit)
