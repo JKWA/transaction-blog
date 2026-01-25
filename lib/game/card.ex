@@ -1,8 +1,9 @@
-use Funx.Eq
-import Funx.Macros, only: [eq_for: 2]
-alias Funx.Optics.Lens
-
 defmodule Game.Card do
+  use Funx.Eq
+  use Funx.Ord
+  import Funx.Macros, only: [eq_for: 2, ord_for: 2]
+  alias Funx.Optics.Lens
+
   defstruct [:id, :rank, :suit]
 
   def new(rank, suit) do
@@ -41,5 +42,13 @@ defmodule Game.Card do
     end
   end
 
+  def card_ord do
+    ord do
+      asc Lens.key(:suit)
+      desc Lens.key(:rank)
+    end
+  end
+
   eq_for(Game.Card, Game.Card.card_eq())
+  ord_for(Game.Card, Game.Card.card_ord())
 end
