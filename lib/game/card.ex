@@ -26,13 +26,6 @@ defmodule Game.Card do
     end
   end
 
-  def card_eq do
-    eq do
-      rank_eq()
-      suit_eq()
-    end
-  end
-
   def playable_eq do
     eq do
       any do
@@ -48,13 +41,19 @@ defmodule Game.Card do
     end
   end
 
-  def card_ord do
+  eq_for(
+    Game.Card,
+    eq do
+      on Lens.key(:rank)
+      on Lens.key(:suit)
+    end
+  )
+
+  ord_for(
+    Game.Card,
     ord do
       asc Lens.key(:suit)
       desc Lens.key(:rank)
     end
-  end
-
-  eq_for(Game.Card, Game.Card.card_eq())
-  ord_for(Game.Card, Game.Card.card_ord())
+  )
 end
